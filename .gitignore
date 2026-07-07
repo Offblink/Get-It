@@ -1,0 +1,6 @@
+__pycache__/
+.pytest_cache/
+*.pyc
+daily_reminder_data.json
+avatar_*.png
+PLAN.md
