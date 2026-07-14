@@ -60,8 +60,11 @@ class ReminderThread(QThread):
                         snoozed = datetime.fromisoformat(schedule.snoozed_until)
                         if now < snoozed:
                             continue
-                        else:
-                            schedule.snoozed_until = None
+                        # Snooze expired — fire reminder now
+                        schedule.snoozed_until = None
+                        schedule.last_triggered = now.isoformat()
+                        self.reminder_due.emit(schedule)
+                        continue
                     except (ValueError, TypeError):
                         schedule.snoozed_until = None
 
@@ -77,6 +80,7 @@ class ReminderThread(QThread):
 
             self.msleep(1000)
 
+
     def _catch_up_missed(self, now: datetime):
         """Check for schedules that should have fired during the gap."""
         for schedule in self._app.settings.schedules:
@@ -84,8 +88,14 @@ class ReminderThread(QThread):
                 continue
             if schedule.snoozed_until:
                 try:
-                    if now < datetime.fromisoformat(schedule.snoozed_until):
+                    snoozed = datetime.fromisoformat(schedule.snoozed_until)
+                    if now < snoozed:
                         continue
+                    # Snooze expired during gap — fire now
+                    schedule.snoozed_until = None
+                    schedule.last_triggered = now.isoformat()
+                    self.reminder_due.emit(schedule)
+                    continue
                 except (ValueError, TypeError):
                     pass
 
