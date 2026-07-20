@@ -1,11 +1,17 @@
 # Get It — 每日提醒应用 (PyQt6)
 
+[![Test](https://github.com/Offblink/Get-It/actions/workflows/test.yml/badge.svg)](https://github.com/Offblink/Get-It/actions)
+
 精致的桌面日程提醒工具。指定时间弹出提醒窗口，支持延后、自定义铃声、角色装扮。
 
 ## 快速开始
 
 ```bash
-pip install PyQt6 pygame numpy Pillow
+# 自动安装依赖（推荐）
+python main.py                  # 首次运行自动 pip install 缺失的库
+
+# 或手动安装
+pip install PyQt6 pygame-ce numpy Pillow
 python Get_It.pyw              # 正常启动
 python Get_It.pyw --minimized  # 启动后最小化到托盘
 ```
@@ -30,9 +36,9 @@ python Get_It.pyw --minimized  # 启动后最小化到托盘
 
 ```
 ├── Get_It.pyw                # ★ 单文件版，直接运行
-├── main.py                   # 模块化入口
+├── main.py                   # 模块化入口（含依赖自动安装）
 ├── app.py                    # 主窗口 + 提醒线程 + 系统托盘
-├── ringtone.py               # 铃声生成器（numpy + pygame）
+├── ringtone.py               # 铃声生成器（numpy + pygame-ce）
 ├── models.py                 # Schedule / AppSettings 数据模型
 ├── data_manager.py           # JSON 持久化
 ├── icon.ico                  # 应用图标
@@ -47,6 +53,9 @@ python Get_It.pyw --minimized  # 启动后最小化到托盘
 │   ├── test_models.py
 │   ├── test_data_manager.py
 │   └── test_snooze.py        # 延后 Bug 修复验证
+├── .github/
+│   └── workflows/
+│       └── test.yml          # CI 自动测试（Python 3.10–3.13）
 └── requirements.txt
 ```
 
@@ -55,6 +64,8 @@ python Get_It.pyw --minimized  # 启动后最小化到托盘
 ```bash
 pytest tests/ -v    # 15 个测试
 ```
+
+每次 push 自动在 GitHub Actions 上跑 4 个 Python 版本的测试。
 
 ## Bug 修复：延后不改时间
 
@@ -68,7 +79,7 @@ pytest tests/ -v    # 15 个测试
 | 组件 | 原版 (tkinter) | PyQt6 版 |
 |---|---|---|
 | GUI | tkinter | PyQt6 |
-| 音频 | pygame | pygame |
+| 音频 | pygame | pygame-ce |
 | 铃声合成 | numpy | numpy |
 | 图像 | Pillow | Pillow |
 | 托盘 | pystray | QSystemTrayIcon |
