@@ -36,6 +36,9 @@ class Schedule:
             d.setdefault(k, v)
         if next_id is not None:
             d['id'] = next_id
+        # Clamp out-of-range values to prevent crashes
+        d['hour'] = max(0, min(23, int(d.get('hour', 0))))
+        d['minute'] = max(0, min(59, int(d.get('minute', 0))))
         return cls(**{k: d[k] for k in [
             'id', 'content', 'hour', 'minute', 'ringtone_name', 'ringtone_key',
             'ringtone_type', 'custom_ringtone_path', 'content_color',

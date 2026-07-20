@@ -4,6 +4,7 @@ Main application class that orchestrates all widgets, dialogs, audio, and the re
 """
 import os
 import sys
+import threading
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -41,42 +42,48 @@ class ReminderThread(QThread):
 
     def run(self):
         while self._running:
-            now = datetime.now()
-            gap = (now - self._last_check).total_seconds()
+            self._app._schedule_lock.acquire()
+            try:
+                now = datetime.now()
+                gap = (now - self._last_check).total_seconds()
 
-            # Catch-up: if gap is large (> 120 seconds), system may have slept
-            if gap > 120 and self._app.settings.catch_up_missed:
-                self._catch_up_missed(now)
+                # Catch-up: if gap is large (> 120 seconds), system may have slept
+                if gap > 120 and self._app.settings.catch_up_missed:
+                    self._catch_up_missed(now)
 
-            self._last_check = now
+                self._last_check = now
 
-            for schedule in self._app.settings.schedules:
-                if not schedule.active:
-                    continue
-
-                # Skip if snoozed
-                if schedule.snoozed_until:
-                    try:
-                        snoozed = datetime.fromisoformat(schedule.snoozed_until)
-                        if now < snoozed:
-                            continue
-                        # Snooze expired — fire reminder now
-                        schedule.snoozed_until = None
-                        schedule.last_triggered = now.isoformat()
-                        self.reminder_due.emit(schedule)
+                for schedule in self._app.settings.schedules:
+                    if not schedule.active:
                         continue
-                    except (ValueError, TypeError):
-                        schedule.snoozed_until = None
+                    if not (0 <= schedule.hour <= 23 and 0 <= schedule.minute <= 59):
+                        continue
 
-                # Check time match (within first 5 seconds of the minute)
-                current_time = now.time()
-                if (current_time.hour == schedule.hour
-                        and current_time.minute == schedule.minute
-                        and 0 <= current_time.second < 5):
-                    last = schedule.last_triggered
-                    if last is None or (now - datetime.fromisoformat(last)).total_seconds() > 55:
-                        schedule.last_triggered = now.isoformat()
-                        self.reminder_due.emit(schedule)
+                    # Skip if snoozed
+                    if schedule.snoozed_until:
+                        try:
+                            snoozed = datetime.fromisoformat(schedule.snoozed_until)
+                            if now < snoozed:
+                                continue
+                            # Snooze expired — fire reminder now
+                            schedule.snoozed_until = None
+                            schedule.last_triggered = now.isoformat()
+                            self.reminder_due.emit(schedule)
+                            continue
+                        except (ValueError, TypeError):
+                            schedule.snoozed_until = None
+
+                    # Check time match (within first 5 seconds of the minute)
+                    current_time = now.time()
+                    if (current_time.hour == schedule.hour
+                            and current_time.minute == schedule.minute
+                            and 0 <= current_time.second < 5):
+                        last = schedule.last_triggered
+                        if last is None or (now - datetime.fromisoformat(last)).total_seconds() > 55:
+                            schedule.last_triggered = now.isoformat()
+                            self.reminder_due.emit(schedule)
+            finally:
+                self._app._schedule_lock.release()
 
             self.msleep(1000)
 
@@ -99,10 +106,14 @@ class ReminderThread(QThread):
                 except (ValueError, TypeError):
                     pass
 
-            # Check if schedule time fell within the gap
-            schedule_time = now.replace(hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0)
-            if self._last_check < schedule_time <= now:
-                # Check not already triggered today
+            # Check if schedule time fell within the gap.
+            # Use _last_check (before gap) as base date to handle overnight sleeps correctly.
+            candidate = self._last_check.replace(
+                hour=schedule.hour, minute=schedule.minute, second=0, microsecond=0
+            )
+            if candidate <= self._last_check:
+                candidate += timedelta(days=1)
+            if self._last_check < candidate <= now:
                 last = schedule.last_triggered
                 if last is None or datetime.fromisoformat(last).date() < now.date():
                     schedule.last_triggered = now.isoformat()
@@ -142,6 +153,7 @@ class GetItApp(QMainWindow):
         self.custom_ringtone_path: Optional[str] = None
         self.avatar_pixmap: Optional[QPixmap] = None
         self.notification_dialog: Optional[NotificationDialog] = None
+        self._schedule_lock = threading.Lock()
 
         # --- Load avatar ---
         self._load_avatar()
@@ -187,12 +199,14 @@ class GetItApp(QMainWindow):
 
     def _play_ringtone(self, schedule: Schedule):
         key = schedule.ringtone_key
+        if key not in self.ringtones:
+            key = "风铃声"
         if key in self.ringtones:
             try:
                 pygame.mixer.stop()
                 self.ringtones[key].play()
             except Exception:
-                if "风铃声" in self.ringtones:
+                if "风铃声" in self.ringtones and key != "风铃声":
                     pygame.mixer.stop()
                     self.ringtones["风铃声"].play()
 
@@ -319,28 +333,29 @@ class GetItApp(QMainWindow):
     # ========================
     def _on_schedule_saved(self, schedule: Schedule):
         """Save or update a schedule from editor."""
-        # Assign ID for new schedules
-        if schedule.id == 0 or schedule.id is None:
-            schedule.id = max((s.id for s in self.settings.schedules), default=0) + 1
-            schedule.snoozed_until = None
-            schedule.last_triggered = None
-            self.settings.schedules.append(schedule)
-            self.status_label.setText(f"已添加日程: {schedule.hour:02d}:{schedule.minute:02d}")
-        else:
-            # Update existing
-            for s in self.settings.schedules:
-                if s.id == schedule.id:
-                    s.content = schedule.content
-                    s.hour = schedule.hour
-                    s.minute = schedule.minute
-                    s.ringtone_name = schedule.ringtone_name
-                    s.ringtone_key = schedule.ringtone_key
-                    s.ringtone_type = schedule.ringtone_type
-                    s.custom_ringtone_path = schedule.custom_ringtone_path
-                    s.content_color = schedule.content_color
-                    s.content_font_size = schedule.content_font_size
-                    break
-            self.status_label.setText(f"已修改日程: {schedule.hour:02d}:{schedule.minute:02d}")
+        with self._schedule_lock:
+            # Assign ID for new schedules
+            if schedule.id == 0 or schedule.id is None:
+                schedule.id = max((s.id for s in self.settings.schedules), default=0) + 1
+                schedule.snoozed_until = None
+                schedule.last_triggered = None
+                self.settings.schedules.append(schedule)
+                self.status_label.setText(f"已添加日程: {schedule.hour:02d}:{schedule.minute:02d}")
+            else:
+                # Update existing
+                for s in self.settings.schedules:
+                    if s.id == schedule.id:
+                        s.content = schedule.content
+                        s.hour = schedule.hour
+                        s.minute = schedule.minute
+                        s.ringtone_name = schedule.ringtone_name
+                        s.ringtone_key = schedule.ringtone_key
+                        s.ringtone_type = schedule.ringtone_type
+                        s.custom_ringtone_path = schedule.custom_ringtone_path
+                        s.content_color = schedule.content_color
+                        s.content_font_size = schedule.content_font_size
+                        break
+                self.status_label.setText(f"已修改日程: {schedule.hour:02d}:{schedule.minute:02d}")
 
         self._refresh_and_save()
         self.editor.clear_form()
@@ -351,7 +366,8 @@ class GetItApp(QMainWindow):
         self.editing_schedule_id = schedule.id
 
     def _on_schedule_deleted(self, schedule: Schedule):
-        self.settings.schedules = [s for s in self.settings.schedules if s.id != schedule.id]
+        with self._schedule_lock:
+            self.settings.schedules = [s for s in self.settings.schedules if s.id != schedule.id]
         if self.editing_schedule_id == schedule.id:
             self.editor.clear_form()
             self.editing_schedule_id = None
@@ -425,8 +441,9 @@ class GetItApp(QMainWindow):
     def _on_snooze(self, schedule: Schedule, minutes: int, dialog):
         """BUG FIX: set snoozed_until without changing schedule hour/minute."""
         self._stop_ringtone()
-        schedule.snoozed_until = (datetime.now() + timedelta(minutes=minutes)).isoformat()
-        schedule.last_triggered = None
+        with self._schedule_lock:
+            schedule.snoozed_until = (datetime.now() + timedelta(minutes=minutes)).isoformat()
+            schedule.last_triggered = None
         self._refresh_and_save()
         new_time = datetime.now() + timedelta(minutes=minutes)
         self.status_label.setText(
@@ -436,7 +453,8 @@ class GetItApp(QMainWindow):
     def _on_dismiss(self, schedule: Schedule, dialog):
         """Handle 'Get it' (dismiss)."""
         self._stop_ringtone()
-        schedule.snoozed_until = None
+        with self._schedule_lock:
+            schedule.snoozed_until = None
         self._refresh_and_save()
         self.status_label.setText("日程已完成")
 
@@ -459,15 +477,9 @@ class GetItApp(QMainWindow):
 # ========================
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName("Get It")
-    app.setQuitOnLastWindowClosed(False)
-
     start_minimized = "--minimized" in sys.argv
     window = GetItApp(start_minimized=start_minimized)
-
-    if not start_minimized:
-        window.show()
-
+    window.show()
     sys.exit(app.exec())
 
 

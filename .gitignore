@@ -1,6 +1,21 @@
 __pycache__/
 .pytest_cache/
 *.pyc
+*.egg-info/
+
+# Virtual env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# User data
 daily_reminder_data.json
 avatar_*.png
 PLAN.md
+
+# OS
+.DS_Store
+Thumbs.db

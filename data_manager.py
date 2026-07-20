@@ -7,11 +7,11 @@ from models import AppSettings
 
 
 def _data_path() -> str:
-    """Return absolute path to data file, next to the exe/script."""
+    """Return absolute path to data file, next to the main script."""
     if getattr(sys, 'frozen', False):
         base = os.path.dirname(sys.executable)
     else:
-        base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        base = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base, "daily_reminder_data.json")
 
 

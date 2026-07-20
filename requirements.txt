@@ -1,4 +1,4 @@
-PyQt6>=6.5
-pygame>=2.0
-numpy>=1.24
-Pillow>=10.0
+PyQt6>=6.5,<7
+pygame-ce>=2.5,<3
+numpy>=1.24,<3
+Pillow>=10,<12
